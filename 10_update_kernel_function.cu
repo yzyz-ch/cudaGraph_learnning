@@ -1,12 +1,10 @@
-// 09：图可以分成两条分支，再汇合，不一定是一条直线。
-// A: a = x * 2      ──┐
-//                     ├──> C: result = a + b = 2*x + max(x, 0)
-// B: b = ReLU(x)    ──┘
-// ReLU：负数变成 0，非负数保持不变。A、B 使用两个不同的 kernel。
-// A、B 只读同一份输入，写不同输出；C 必须等两者都完成。
-// 没有 A->B 依赖意味着允许并行，但不保证实际同时运行。
-// 编译: mkdir -p build && nvcc -O2 -std=c++14 09_graph_dependencies.cu -o build/09_graph_dependencies
-// 运行: ./build/09_graph_dependencies
+// 10：在 09 的分支图上，把 B 的 kernel 从 ReLU 换成求立方。
+// 第一次：A = 2*x，B = max(x, 0)，C = A+B。
+// 第二次：A = 2*x，B = x*x*x，    C = A+B。
+// 只构图、实例化一次；更新 B 的函数后，再运行同一个 exec。
+// B 前后都是 Kernel 节点，节点类型和 A/B -> C 的依赖都没变。
+// 编译: mkdir -p build && nvcc -O2 -std=c++14 10_update_kernel_function.cu -o build/10_update_kernel_function
+// 运行: ./build/10_update_kernel_function
 
 #include <cstdio>
 #include <cuda_runtime.h>
@@ -21,16 +19,21 @@
         }                                                                      \
     } while (0)
 
-// A：每个输入乘 2，写入独立的数组 a。
 __global__ void scale(const float* x, float* a, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) a[i] = x[i] * 2.f;
 }
 
-// B：读取同一份原始输入 x，负数变成 0，写入另一个数组 b。
 __global__ void relu(const float* x, float* b, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) b[i] = x[i] > 0.f ? x[i] : 0.f;
+}
+
+// 新 kernel：读取原始输入 x，计算立方，仍然写入 b。
+// 与 relu 的参数顺序和类型一致，所以可沿用 B 原来的参数列表。
+__global__ void cube(const float* x, float* b, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) b[i] = x[i] * x[i] * x[i];
 }
 
 __global__ void add_arrays(const float* a, const float* b, float* result, int n) {
@@ -41,8 +44,7 @@ __global__ void add_arrays(const float* a, const float* b, float* result, int n)
 int main() {
     int n = 4;
     const float input[4] = {-2.f, -1.f, 0.f, 3.f};
-    float output_a[4], output_b[4];
-    float output[4];
+    float output_a[4], output_b[4], output[4];
     float *d_x, *d_a, *d_b, *d_result;
     CHECK(cudaMalloc(&d_x, n * sizeof(float)));
     CHECK(cudaMalloc(&d_a, n * sizeof(float)));
@@ -62,39 +64,52 @@ int main() {
     params.blockDim = dim3(n);
     cudaGraphNode_t a, b, c;
 
-    // A、B 都没有前置节点；“先调用 Add A，再调用 Add B”不等于 A->B。
     params.func = reinterpret_cast<void*>(scale);
     params.kernelParams = args_a;
     CHECK(cudaGraphAddKernelNode(&a, graph, nullptr, 0, &params));
-    // 添加节点会复制参数描述；重用 params 配置 B，不会改变已经添加的 A。
+
     params.func = reinterpret_cast<void*>(relu);
     params.kernelParams = args_b;
-    CHECK(cudaGraphAddKernelNode(&b, graph, nullptr, 0, &params));
+    // 单独保存 B 的完整参数描述，之后配置 C 时不会把它覆盖。
+    cudaKernelNodeParams b_params = params;
+    CHECK(cudaGraphAddKernelNode(&b, graph, nullptr, 0, &b_params));
 
-    // 依赖数组明确告诉 CUDA：必须完成 A 和 B，才能执行 C。
     cudaGraphNode_t dependencies[] = {a, b};
     params.func = reinterpret_cast<void*>(add_arrays);
     params.kernelParams = args_c;
     CHECK(cudaGraphAddKernelNode(&c, graph, dependencies, 2, &params));
     cudaGraphExec_t exec;
     CHECK(cudaGraphInstantiate(&exec, graph, 0));
-    // 图提交到一条流，不代表图内所有节点都被强制串行；内部看依赖关系。
-    CHECK(cudaGraphLaunch(exec, stream));
-    CHECK(cudaStreamSynchronize(stream));
-    CHECK(cudaMemcpy(output_a, d_a, n * sizeof(float), cudaMemcpyDeviceToHost));
-    CHECK(cudaMemcpy(output_b, d_b, n * sizeof(float), cudaMemcpyDeviceToHost));
-    CHECK(cudaMemcpy(output, d_result, n * sizeof(float), cudaMemcpyDeviceToHost));
 
-    bool ok = true;
-    printf(" x   A=2*x    B=ReLU(x)    C=A+B\n");
-    for (int i = 0; i < n; ++i) {
-        const float expected_a = input[i] * 2.f;
-        const float expected_b = input[i] > 0.f ? input[i] : 0.f;
-        printf("%2.0f %7.0f %12.0f %8.0f\n", input[i], output_a[i], output_b[i], output[i]);
-        if (output_a[i] != expected_a || output_b[i] != expected_b ||
-            output[i] != expected_a + expected_b) ok = false;
+    bool all_ok = true;
+    for (int round = 0; round < 2; ++round) {
+        if (round == 1) {
+            // 第一次已同步完成。现在只把 exec 中 B 的函数换成 cube。
+            // 只改 b_params.func 还不够，下一行 API 才真正更新 exec。
+            b_params.func = reinterpret_cast<void*>(cube);
+            CHECK(cudaGraphExecKernelNodeSetParams(exec, b, &b_params));
+        }
+        CHECK(cudaGraphLaunch(exec, stream));
+        CHECK(cudaStreamSynchronize(stream));
+        CHECK(cudaMemcpy(output_a, d_a, n * sizeof(float), cudaMemcpyDeviceToHost));
+        CHECK(cudaMemcpy(output_b, d_b, n * sizeof(float), cudaMemcpyDeviceToHost));
+        CHECK(cudaMemcpy(output, d_result, n * sizeof(float), cudaMemcpyDeviceToHost));
+
+        printf("第 %d 次执行：B = %s\n", round + 1, round == 0 ? "ReLU(x)" : "x*x*x");
+        printf(" x   A=2*x            B    C=A+B\n");
+        bool ok = true;
+        for (int i = 0; i < n; ++i) {
+            const float x = input[i];
+            const float expected_a = x * 2.f;
+            const float expected_b = round == 0 ? (x > 0.f ? x : 0.f) : x * x * x;
+            printf("%2.0f %7.0f %12.0f %8.0f\n", x, output_a[i], output_b[i], output[i]);
+            if (output_a[i] != expected_a || output_b[i] != expected_b ||
+                output[i] != expected_a + expected_b) ok = false;
+        }
+        printf("%s\n", ok ? "PASS" : "FAIL");
+        all_ok = all_ok && ok;
     }
-    printf("%s\n", ok ? "PASS" : "FAIL");
+    // node b 来自 graph，因此保留原 graph 到节点更新完成之后。
     CHECK(cudaGraphExecDestroy(exec));
     CHECK(cudaGraphDestroy(graph));
     CHECK(cudaStreamDestroy(stream));
@@ -102,5 +117,5 @@ int main() {
     CHECK(cudaFree(d_a));
     CHECK(cudaFree(d_b));
     CHECK(cudaFree(d_result));
-    return ok ? 0 : 1;
+    return all_ok ? 0 : 1;
 }

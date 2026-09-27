@@ -9,9 +9,9 @@
 | 阶段 | 说明 | 示例 |
 | --- | --- | --- |
 | Step 1 | [入门：捕获、复用、性能与加速原理](step1.md) | 01–04 |
-| Step 2 | [进阶：参数更新、重建、复制与依赖](step2.md) | 05–09 |
+| Step 2 | [进阶：参数更新、重建、复制与依赖](step2.md) | 05–11 |
 
-先完成 Step 1，再进入 Step 2。Step 2 里建议先学 05–07，能区分“换数据、更新参数、重新构建”后，再学 08–09。
+先完成 Step 1，再进入 Step 2。Step 2 里建议先学 05–07，能区分“换数据、更新参数、重新构建”后，再学 08–09，最后对比 10 的替换 kernel 函数和 11 的添加新节点。
 
 `step1.md` 里写到的“下一阶段学习说明”就是 [step2.md](step2.md)。两份说明保留原来的正文，没有改写。
 
@@ -28,6 +28,8 @@
 | [07_rebuild_graph.cu](07_rebuild_graph.cu) | 节点数量变化时，更新被拒绝后重新实例化 |
 | [08_capture_memcpy.cu](08_capture_memcpy.cu) | 把输入复制、计算、输出复制放进同一张图 |
 | [09_graph_dependencies.cu](09_graph_dependencies.cu) | 两条分支汇合后再继续 |
+| [10_update_kernel_function.cu](10_update_kernel_function.cu) | 保留同一个 exec，把 B 从 ReLU 改为求立方 |
+| [11_add_node.cu](11_add_node.cu) | 在 C 后添加 D 节点，重新实例化后执行新流程 |
 
 原理、编译命令、预期输出和练习都写在对应阶段的说明里。
 

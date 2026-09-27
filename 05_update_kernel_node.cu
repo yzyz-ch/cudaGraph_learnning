@@ -50,7 +50,6 @@ int main() {
     cudaGraphExec_t exec;
     CHECK(cudaGraphInstantiate(&exec, graph, 0));
 
-    const char* labels[] = {"original", "CPU variable only", "exec updated"};
     bool all_ok = true;
     for (int round = 0; round < 3; ++round) {
         if (round == 1) delta = 10.f;  // 仅修改 CPU 变量，exec 中仍然是 1。
@@ -65,7 +64,7 @@ int main() {
         CHECK(cudaMemcpy(output, d, n * sizeof(float), cudaMemcpyDeviceToHost));
         const float expected_delta = round < 2 ? 1.f : delta;
         bool ok = true;
-        printf("%s (CPU delta=%.0f):", labels[round], delta);
+        printf("第 %d 次执行:", round + 1);
         for (int i = 0; i < n; ++i) {
             printf(" %.0f", output[i]);
             if (output[i] != input[i] + expected_delta) ok = false;
