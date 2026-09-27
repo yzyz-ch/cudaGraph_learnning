@@ -103,7 +103,9 @@ int main() {
         const auto submitted = std::chrono::steady_clock::now();
         CHECK(cudaStreamSynchronize(stream));
         const auto finished = std::chrono::steady_clock::now();
+        // submit_ms 是 CPU 提交循环经过的时间，可能包含队列拥塞带来的等待；
         const double submit_ms = std::chrono::duration<double, std::milli>(submitted - start).count();
+        // total_ms 是从开始提交到 GPU 全部完成的时间，不是两段时间相加。
         const double total_ms = std::chrono::duration<double, std::milli>(finished - start).count();
 
         // 不计入计时：检查每一种分组都完成了相同的计算。
