@@ -10,10 +10,13 @@
 | --- | --- | --- |
 | Step 1 | [入门：捕获、复用、性能与加速原理](step1.md) | 01–04 |
 | Step 2 | [进阶：参数更新、重建、复制与依赖](step2.md) | 05–11 |
+| Step 3 | [应用：多流、内存、更新测试、计时、节点开关与缓存](step3.md) | 12–17 |
 
 先完成 Step 1，再进入 Step 2。Step 2 里建议先学 05–07，能区分“换数据、更新参数、重新构建”后，再学 08–09，最后对比 10 的替换 kernel 函数和 11 的添加新节点。
 
-`step1.md` 里写到的“下一阶段学习说明”就是 [step2.md](step2.md)。两份说明保留原来的正文，没有改写。
+完成前 11 节后进入 Step 3。想先做更新能力测试，可以直接学 14、15；想先处理实际数据流程，可以从 12、13 开始。14 比其他例子长，按函数分组阅读即可。
+
+`step1.md` 里写到的“下一阶段学习说明”就是 [step2.md](step2.md)，第三阶段内容集中在 [step3.md](step3.md)。
 
 ## 示例
 
@@ -30,6 +33,12 @@
 | [09_graph_dependencies.cu](09_graph_dependencies.cu) | 两条分支汇合后再继续 |
 | [10_update_kernel_function.cu](10_update_kernel_function.cu) | 保留同一个 exec，把 B 从 ReLU 改为求立方 |
 | [11_add_node.cu](11_add_node.cu) | 在 C 后添加 D 节点，重新实例化后执行新流程 |
+| [12_multistream_capture.cu](12_multistream_capture.cu) | 用 event 将两条流的分支捕获为一张图 |
+| [13_buffer_lifetime.cu](13_buffer_lifetime.cu) | 两套缓冲区轮流使用，复用前等待对应任务完成 |
+| [14_update_support.cu](14_update_support.cu) | 单节点与整图更新的 23 项行为测试 |
+| [15_graph_timing.cu](15_graph_timing.cu) | 区分准备、首次执行、更新和重放耗时 |
+| [16_enable_node.cu](16_enable_node.cu) | 启用、禁用已有节点，复用同一个 exec |
+| [17_graph_cache.cu](17_graph_cache.cu) | 按输入规模保存并复用多个 exec |
 
 原理、编译命令、预期输出和练习都写在对应阶段的说明里。
 
